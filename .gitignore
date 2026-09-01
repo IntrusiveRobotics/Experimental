@@ -1,0 +1,25 @@
+*~
+
+build
+tools
+downloads
+package/
+
+.dep
+.project
+.cproject
+.settings/language.settings.xml
+.DS_Store
+workspace.code-workspace
+
+# Qt project settings
+*.pro.user
+*.pro.shared
+
+.vscode
+
+# Build artifacts and local snapshots
+build/
+builds/
+.DS_Store
+*.bak
