@@ -64,11 +64,15 @@ fitted with 68.1k. The source tree itself keeps the schematic-confirmed 43.2k.
 
 Since 2026-08-25 the 150k/240k builds use the **adaptive divider** (`motor/mcpwm_foc.c`,
 ADC ISR). The undivided loop rate is derived from the **live timer period (TIM1->ARR)**,
-never from the configured f_zv: during a switching-frequency change the config updates
-before the timer, and an earlier revision that computed from the config briefly ran the
-full FOC loop at the old high ISR rate — starving the RTOS and watchdog-resetting the
-VESC (seen as a disconnect when lowering f_zv 150k→30k, and mid-wizard). With the
-ARR-based computation that race is structurally gone.
+never from the configured f_zv. Deriving it from the timer makes switching-frequency
+changes safe by construction: the ARR the ISR reads is always the period it is actually
+running at, so there is no window in which the loop rate and the hardware disagree.
+
+*Why it is done this way:* on a switching-frequency change the config updates before the
+timer does. A pre-release revision that computed the rate from the config could briefly
+run the full FOC loop at the old, higher ISR rate during that window. The ARR-based
+computation removes the race structurally rather than papering over it, and the
+transition has been clean since.
 
 Divider selection: undivided-loop rates ≤ `FOC_LOOP_RATE_STOCK_MAX_HZ` (31 kHz) run with
 **divider 1** — stock behavior for f_zv ≤ 30k in V0_V7, which covers every detection
