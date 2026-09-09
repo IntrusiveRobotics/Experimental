@@ -48,11 +48,12 @@ void hw_init_gpio(void) {
 	LED_GREEN_OFF();
 	LED_RED_OFF();
 
-	// Phase voltage-sense filter switches (PD2) -- start open
-	palSetPadMode(PHASE_FILTER_GPIO, PHASE_FILTER_PIN,
+	// Current-sense filter switches (PD2) -- engage for normal operation; the
+	// FOC ISR toggles them off only while HFI is injecting.
+	palSetPadMode(CURRENT_FILTER_GPIO, CURRENT_FILTER_PIN,
 			PAL_MODE_OUTPUT_PUSHPULL |
 			PAL_STM32_OSPEED_HIGHEST);
-	PHASE_FILTER_OFF();
+	CURRENT_FILTER_ON();
 
 	// TIM1 PWM outputs to LMG2100R026 gate driver inputs
 	// CH1/CH1N -> U  : PA8  (HI), PB13 (LO)
