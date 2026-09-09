@@ -6,7 +6,7 @@ stock VESC while keeping the FOC control loop inside the F405's CPU budget, usin
 `FOC_CONTROL_LOOP_FREQ_DIVIDER` (originally added by Marcos Chaparro for the Axiom,
 paltatech/bldc commit 9652231, for "PWM running at 100+kHz").
 
-Last updated 2026-08-31.
+Last updated 2026-09-08.
 
 ## Version history & build snapshots
 
@@ -21,7 +21,9 @@ folders always hold the LATEST full artifact set (bin/elf/hex/dmp/list).
 | v3 | 2026-08-27 | Voltage divider fix (VIN_R1 68.1k→43.2k); baked sensorless startup defaults |
 | v4 | 2026-08-31 | `_2` variants (VIN_R1=68.1k) for the 68.1k-divider board population |
 | v5 | 2026-08-31 | HFI + silent HFI divider compatibility fix (first versioned snapshot) |
+| v7 | 2026-09-02 | PD2 rewired from mislabeled phase filters to the CURRENT-sense filter (matches official VESC 6): `HW_HAS_PHASE_FILTERS`/`PHASE_FILTER_*` removed, `CURRENT_FILTER_ON()/OFF()` defined on PD2 (high = filter in), GPIO init engages it at boot. Until now the current filter was never driven (hw.h no-op defaults) — HFI's automatic filter-off/on toggling now actually works. Phase-filter observer math is compiled out; `foc_phase_filter_enable` forced false. |
 | v6 | 2026-08-31 | Shunt-selection margin scaled with ARR (`mcpwm_foc.c` LONGEST_ZERO branch): upstream's fixed 500-tick "low modulation" threshold is ~9% of the period at stock 30k but ~45% at 150k, so duty swings crossed it and the shunt-pair selection flipped constantly — step discontinuities visible as spikes in the MC-total current. Now `ARR/11` (509 at stock = unchanged; 101 at 150k). Diagnosed from bench capture: clean phase currents but spiky "Total current filtered by MC" at 150k/12% duty. |
+| v11 | 2026-09-08 | Bench-proven sensorless profile baked into defaults: removes the v3 aggressive-start bakes (openloop 1800 / boost 10 A / start-curr-dec 0.05 / lock 0.1 s — back to stock), adds SL_ERPM 4000, T_RAMP 0, MXV_LAMBDA_COMP observer, bench-motor detected constants + current gains + ±26 A limits + 6S battery cut (20.4/18 V). The motor constants and limits are for ONE specific 14-pole ~370 Kv test motor — run FOC detection for any other motor. Dead-time compensation and per-board ADC offsets are deliberately not baked (this tree keeps 40 ns dead time; offsets recalibrate on boot). |
 
 ## Frequency semantics (source of endless confusion — see vedderb/bldc issue #212)
 
@@ -64,11 +66,15 @@ fitted with 68.1k. The source tree itself keeps the schematic-confirmed 43.2k.
 
 Since 2026-08-25 the 150k/240k builds use the **adaptive divider** (`motor/mcpwm_foc.c`,
 ADC ISR). The undivided loop rate is derived from the **live timer period (TIM1->ARR)**,
-never from the configured f_zv: during a switching-frequency change the config updates
-before the timer, and an earlier revision that computed from the config briefly ran the
-full FOC loop at the old high ISR rate — starving the RTOS and watchdog-resetting the
-VESC (seen as a disconnect when lowering f_zv 150k→30k, and mid-wizard). With the
-ARR-based computation that race is structurally gone.
+never from the configured f_zv. Deriving it from the timer makes switching-frequency
+changes safe by construction: the ARR the ISR reads is always the period it is actually
+running at, so there is no window in which the loop rate and the hardware disagree.
+
+*Why it is done this way:* on a switching-frequency change the config updates before the
+timer does. A pre-release revision that computed the rate from the config could briefly
+run the full FOC loop at the old, higher ISR rate during that window. The ARR-based
+computation removes the race structurally rather than papering over it, and the
+transition has been clean since.
 
 Divider selection: undivided-loop rates ≤ `FOC_LOOP_RATE_STOCK_MAX_HZ` (31 kHz) run with
 **divider 1** — stock behavior for f_zv ≤ 30k in V0_V7, which covers every detection

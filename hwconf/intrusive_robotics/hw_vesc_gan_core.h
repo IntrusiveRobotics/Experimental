@@ -54,15 +54,17 @@
 // INA241 with REF1=VS, REF2=GND outputs (VS/2) + (gain * Rshunt * I), so positive
 // motor current produces a rising ADC reading. Do NOT define INVERTED_SHUNT_POLARITY.
 
-// Phase voltage-sense filters on PD2 (single GPIO drives all three analog
-// switches), matching the VESC6 reference design. Driven HIGH to close the
-// switches (clean phase voltage to the observer at low ERPM). Runtime gating
-// still requires foc_phase_filter_enable in the mcconf.
-#define HW_HAS_PHASE_FILTERS
-#define PHASE_FILTER_GPIO		GPIOD
-#define PHASE_FILTER_PIN		2
-#define PHASE_FILTER_ON()		palSetPad(PHASE_FILTER_GPIO, PHASE_FILTER_PIN)
-#define PHASE_FILTER_OFF()		palClearPad(PHASE_FILTER_GPIO, PHASE_FILTER_PIN)
+// PD2 drives the analog switches on the CURRENT-sense RC filters — matching the
+// official VESC 6 reference, which also puts CURRENT_FILTER on PD2. This was
+// previously mislabeled as phase-voltage filters (HW_HAS_PHASE_FILTERS): the
+// board has no switchable phase filters, so that define is gone and the
+// phase-filter observer math is disabled. High = switches closed = filter in.
+// mcpwm_foc drives this automatically: OFF while HFI runs (it needs the raw
+// current derivative), ON in all other running states.
+#define CURRENT_FILTER_GPIO		GPIOD
+#define CURRENT_FILTER_PIN		2
+#define CURRENT_FILTER_ON()		palSetPad(CURRENT_FILTER_GPIO, CURRENT_FILTER_PIN)
+#define CURRENT_FILTER_OFF()	palClearPad(CURRENT_FILTER_GPIO, CURRENT_FILTER_PIN)
 
 // LEDs -- TODO: confirm against schematic
 #define LED_GREEN_GPIO			GPIOB
@@ -290,35 +292,78 @@
 #ifndef MCCONF_FOC_CONTROL_SAMPLE_MODE
 #define MCCONF_FOC_CONTROL_SAMPLE_MODE	FOC_CONTROL_SAMPLE_MODE_V0_V7
 #endif
-// Sensorless startup tuning baked in from bench work (2026-08-27). Values that
-// match mcconf_default.h (openloop hysteresis/ramp 0.1 s, max q -1, curr-dec ERPM
-// 2500, sat comp off) are not repeated here.
-#ifndef MCCONF_FOC_OPENLOOP_RPM
-#define MCCONF_FOC_OPENLOOP_RPM			1800.0	// Openloop ERPM
-#endif
-#ifndef MCCONF_FOC_OPENLOOP_RPM_LOW
-#define MCCONF_FOC_OPENLOOP_RPM_LOW		0.1		// Fraction of openloop ERPM at min current
-#endif
-#ifndef MCCONF_FOC_SL_OPENLOOP_T_LOCK
-#define MCCONF_FOC_SL_OPENLOOP_T_LOCK	0.1		// Lock time before openloop ramp (s)
+// Sensorless / open-loop start settings from a bench-proven profile (2026-09-08)
+// for a smooth default start. This REMOVES the earlier aggressive-start bakes
+// (openloop 1800 ERPM, 10 A boost, start-current-decrease 0.05, lock 0.1 s) —
+// starting is smoother on stock values for those. Only deviations from
+// mcconf_default.h are listed.
+#ifndef MCCONF_FOC_SL_ERPM
+#define MCCONF_FOC_SL_ERPM				4000.0	// Later handoff to the observer
 #endif
 #ifndef MCCONF_FOC_SL_OPENLOOP_TIME
-#define MCCONF_FOC_SL_OPENLOOP_TIME		0.1		// Time in openloop after ramp (s)
+#define MCCONF_FOC_SL_OPENLOOP_TIME		0.1
 #endif
-#ifndef MCCONF_FOC_SL_OPENLOOP_BOOST_Q
-#define MCCONF_FOC_SL_OPENLOOP_BOOST_Q	10.0	// Q-axis current boost during openloop (A)
+#ifndef MCCONF_FOC_SL_OPENLOOP_T_RAMP
+#define MCCONF_FOC_SL_OPENLOOP_T_RAMP	0.0
 #endif
-#ifndef MCCONF_FOC_START_CURR_DEC
-#define MCCONF_FOC_START_CURR_DEC		0.05	// Start current decrease fraction
+// MXV observer with lambda compensation
+#ifndef MCCONF_FOC_OBSERVER_TYPE
+#define MCCONF_FOC_OBSERVER_TYPE		FOC_OBSERVER_MXV_LAMBDA_COMP
+#endif
+// Bench motor detection results + tuning for ONE SPECIFIC test motor (14-pole,
+// ~370 Kv drone motor). These let a fresh config spin that bench motor without a
+// wizard run. THEY ARE NOT GENERIC: on any other motor, run FOC detection in VESC
+// Tool before applying torque. The current limits below are that motor's detected
+// values, not a board rating (the board's absolute ceiling is
+// MCCONF_L_MAX_ABS_CURRENT).
+#ifndef MCCONF_FOC_MOTOR_R
+#define MCCONF_FOC_MOTOR_R				0.0491708
+#endif
+#ifndef MCCONF_FOC_MOTOR_L
+#define MCCONF_FOC_MOTOR_L				2.33379e-05
+#endif
+#ifndef MCCONF_FOC_MOTOR_LD_LQ_DIFF
+#define MCCONF_FOC_MOTOR_LD_LQ_DIFF		6.78116e-06
+#endif
+#ifndef MCCONF_FOC_MOTOR_FLUX_LINKAGE
+#define MCCONF_FOC_MOTOR_FLUX_LINKAGE	0.00215029
+#endif
+#ifndef MCCONF_FOC_OBSERVER_GAIN
+#define MCCONF_FOC_OBSERVER_GAIN		2.16274e+08
+#endif
+#ifndef MCCONF_FOC_CURRENT_KP
+#define MCCONF_FOC_CURRENT_KP			0.0233379
+#endif
+#ifndef MCCONF_FOC_CURRENT_KI
+#define MCCONF_FOC_CURRENT_KI			49.1707
+#endif
+#ifndef MCCONF_L_CURRENT_MAX
+#define MCCONF_L_CURRENT_MAX			26.0367
+#endif
+#ifndef MCCONF_L_CURRENT_MIN
+#define MCCONF_L_CURRENT_MIN			-26.0367
+#endif
+// Battery-cut defaults for the 6S BENCH PACK (3.40 / 3.00 V per cell). Set your
+// own cell count and cutoffs in VESC Tool — on a higher-cell pack these defaults
+// sit far below the real pack voltage, so undervoltage protection will not engage.
+#ifndef MCCONF_SI_BATTERY_CELLS
+#define MCCONF_SI_BATTERY_CELLS			6
+#endif
+#ifndef MCCONF_L_BATTERY_CUT_START
+#define MCCONF_L_BATTERY_CUT_START		20.4
+#endif
+#ifndef MCCONF_L_BATTERY_CUT_END
+#define MCCONF_L_BATTERY_CUT_END		18.0
 #endif
 // Temp comp deliberately NOT baked as true: the board defaults motor temp sensing
 // to TEMP_SENSOR_DISABLED (below), so resistance temp compensation would track a
-// dead input; the tool's 0.0 C base temp seen on the bench was a symptom of that.
+// dead input.
 #ifndef MCCONF_FOC_TEMP_COMP
 #define MCCONF_FOC_TEMP_COMP			false
 #endif
-// Board has phase filters (HW_HAS_PHASE_FILTERS, PD2) but default them OFF on a
-// fresh config — overrides mcconf_default.h's "true". Still user-toggleable in VESC Tool.
+// Board has NO switchable phase filters (PD2 is the current filter — see above).
+// Force the flag false so the tool shows the truth; the phase-filter observer
+// math is compiled out anyway (no HW_HAS_PHASE_FILTERS).
 #ifndef MCCONF_FOC_PHASE_FILTER_ENABLE
 #define MCCONF_FOC_PHASE_FILTER_ENABLE	false
 #endif
